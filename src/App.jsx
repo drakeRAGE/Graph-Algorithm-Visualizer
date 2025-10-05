@@ -1,4 +1,66 @@
-import React, { useState } from 'react';
+/* eslint-disable react/prop-types */
+/* eslint-disable react/display-name */
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+  useEffect,
+} from 'react';
+
+const Node = React.memo(({ node, onClick, color }) => (
+  <g onClick={onClick} className="cursor-pointer">
+    <circle
+      cx={node.x}
+      cy={node.y}
+      r="25"
+      fill={color}
+      className="transition-colors duration-300 shadow-lg"
+    />
+    <text
+      x={node.x}
+      y={node.y}
+      textAnchor="middle"
+      dy=".3em"
+      fill="white"
+      className="text-sm font-bold pointer-events-none"
+    >
+      {node.label}
+    </text>
+  </g>
+));
+
+const Edge = React.memo(({ edge, fromNode, toNode, color }) => (
+  <g>
+    <line
+      x1={fromNode.x}
+      y1={fromNode.y}
+      x2={toNode.x}
+      y2={toNode.y}
+      stroke={color}
+      strokeWidth="3"
+      className="transition-colors duration-300"
+    />
+    <rect
+      x={(fromNode.x + toNode.x) / 2 - 12}
+      y={(fromNode.y + toNode.y) / 2 - 12}
+      width="24"
+      height="24"
+      fill="white"
+      rx="4"
+    />
+    <text
+      x={(fromNode.x + toNode.x) / 2}
+      y={(fromNode.y + toNode.y) / 2}
+      textAnchor="middle"
+      dy=".3em"
+      className="text-sm font-semibold"
+      fill="#4B5563"
+    >
+      {edge.weight}
+    </text>
+  </g>
+));
 
 const App = () => {
   const [nodes, setNodes] = useState([]);
@@ -14,6 +76,37 @@ const App = () => {
   const [isAddingEdge, setIsAddingEdge] = useState(false);
   const [tempEdge, setTempEdge] = useState(null);
 
+  const tempToRef = useRef({ x: 0, y: 0 });
+  const rafRef = useRef(null);
+
+  const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+
+  const getNodeColor = useCallback(
+    (nodeId) => {
+      if (nodeId === startNode) return '#22C55E';
+      if (nodeId === endNode) return '#8B5CF6';
+      if (path.slice(0, currentStep + 1).includes(nodeId)) return '#EF4444';
+      return '#4B5563';
+    },
+    [startNode, endNode, path, currentStep]
+  );
+
+  const getEdgeColor = useCallback(
+    (from, to) => {
+      if (!path.length) return '#9CA3AF';
+      for (let i = 0; i < currentStep; i++) {
+        if (
+          (path[i] === from && path[i + 1] === to) ||
+          (path[i] === to && path[i + 1] === from)
+        ) {
+          return '#EF4444';
+        }
+      }
+      return '#9CA3AF';
+    },
+    [path, currentStep]
+  );
+
   // Handle canvas click for adding nodes
   const handleCanvasClick = (e) => {
     if (mode !== 'add') return;
@@ -27,7 +120,7 @@ const App = () => {
       id: nodeIdCounter,
       label: `Node ${nodeIdCounter}`,
       x,
-      y
+      y,
     };
 
     setNodes([...nodes, newNode]);
@@ -47,12 +140,13 @@ const App = () => {
         setSelectedNode(node);
         setIsAddingEdge(true);
         setTempEdge({ from: node, to: { x: node.x, y: node.y } });
+        tempToRef.current = { x: node.x, y: node.y };
       } else {
         if (selectedNode.id !== node.id) {
           const newEdge = {
             from: selectedNode.id,
             to: node.id,
-            weight: parseInt(weight)
+            weight: parseInt(weight),
           };
           setEdges([...edges, newEdge]);
         }
@@ -70,12 +164,33 @@ const App = () => {
       const rect = svg.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      setTempEdge(prev => ({
-        ...prev,
-        to: { x, y }
-      }));
+      tempToRef.current = { x, y };
+      scheduleUpdate(() => {
+        setTempEdge((prev) => ({
+          ...prev,
+          to: { ...tempToRef.current },
+        }));
+      });
     }
   };
+
+  // Batch updates using requestAnimationFrame
+  const scheduleUpdate = (updateFn) => {
+    if (!rafRef.current) {
+      rafRef.current = requestAnimationFrame(() => {
+        updateFn();
+        rafRef.current = null;
+      });
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
 
   // Dijkstra's algorithm implementation
   const dijkstra = (start, end) => {
@@ -86,7 +201,7 @@ const App = () => {
     const unvisited = new Set();
     const steps = [];
 
-    nodes.forEach(node => {
+    nodes.forEach((node) => {
       distances[node.id] = Infinity;
       previous[node.id] = null;
       unvisited.add(node.id);
@@ -96,7 +211,7 @@ const App = () => {
     while (unvisited.size > 0) {
       let current = null;
       let minDistance = Infinity;
-      unvisited.forEach(nodeId => {
+      unvisited.forEach((nodeId) => {
         if (distances[nodeId] < minDistance) {
           minDistance = distances[nodeId];
           current = nodeId;
@@ -109,8 +224,8 @@ const App = () => {
       steps.push(current);
 
       edges
-        .filter(edge => edge.from === current || edge.to === current)
-        .forEach(edge => {
+        .filter((edge) => edge.from === current || edge.to === current)
+        .forEach((edge) => {
           const neighbor = edge.from === current ? edge.to : edge.from;
           if (!unvisited.has(neighbor)) return;
 
@@ -159,24 +274,6 @@ const App = () => {
     setNodeIdCounter(1);
   };
 
-  const getNodeColor = (nodeId) => {
-    if (nodeId === startNode) return '#22C55E';
-    if (nodeId === endNode) return '#8B5CF6';
-    if (path.slice(0, currentStep + 1).includes(nodeId)) return '#EF4444';
-    return '#4B5563';
-  };
-
-  const getEdgeColor = (from, to) => {
-    if (!path.length) return '#9CA3AF';
-    for (let i = 0; i < currentStep; i++) {
-      if ((path[i] === from && path[i + 1] === to) ||
-        (path[i] === to && path[i + 1] === from)) {
-        return '#EF4444';
-      }
-    }
-    return '#9CA3AF';
-  };
-
   return (
     <div className="min-h-screen bg-gray-100 p-8">
       <div className="max-w-6xl mx-auto bg-white rounded-xl shadow-lg p-6">
@@ -188,29 +285,41 @@ const App = () => {
           <div className="flex flex-wrap justify-center gap-4">
             <button
               onClick={() => setMode('add')}
-              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${mode === 'add' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'
-                }`}
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+                mode === 'add'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-gray-200 text-gray-700'
+              }`}
             >
               Add Nodes
             </button>
             <button
               onClick={() => setMode('connect')}
-              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${mode === 'connect' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'
-                }`}
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+                mode === 'connect'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-gray-200 text-gray-700'
+              }`}
             >
               Connect Nodes
             </button>
             <button
               onClick={() => setMode('setStart')}
-              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${mode === 'setStart' ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-700'
-                }`}
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+                mode === 'setStart'
+                  ? 'bg-green-500 text-white'
+                  : 'bg-gray-200 text-gray-700'
+              }`}
             >
               Set Start Node
             </button>
             <button
               onClick={() => setMode('setEnd')}
-              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${mode === 'setEnd' ? 'bg-purple-500 text-white' : 'bg-gray-200 text-gray-700'
-                }`}
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+                mode === 'setEnd'
+                  ? 'bg-purple-500 text-white'
+                  : 'bg-gray-200 text-gray-700'
+              }`}
             >
               Set End Node
             </button>
@@ -266,41 +375,15 @@ const App = () => {
             onMouseMove={handleMouseMove}
           >
             {/* Draw edges */}
-            {edges.map((edge, index) => {
-              const fromNode = nodes.find(n => n.id === edge.from);
-              const toNode = nodes.find(n => n.id === edge.to);
-              return (
-                <g key={`edge-${index}`}>
-                  <line
-                    x1={fromNode.x}
-                    y1={fromNode.y}
-                    x2={toNode.x}
-                    y2={toNode.y}
-                    stroke={getEdgeColor(edge.from, edge.to)}
-                    strokeWidth="3"
-                    className="transition-colors duration-300"
-                  />
-                  <rect
-                    x={(fromNode.x + toNode.x) / 2 - 12}
-                    y={(fromNode.y + toNode.y) / 2 - 12}
-                    width="24"
-                    height="24"
-                    fill="white"
-                    rx="4"
-                  />
-                  <text
-                    x={(fromNode.x + toNode.x) / 2}
-                    y={(fromNode.y + toNode.y) / 2}
-                    textAnchor="middle"
-                    dy=".3em"
-                    className="text-sm font-semibold"
-                    fill="#4B5563"
-                  >
-                    {edge.weight}
-                  </text>
-                </g>
-              );
-            })}
+            {edges.map((edge, index) => (
+              <Edge
+                key={`edge-${index}`}
+                edge={edge}
+                fromNode={nodeMap.get(edge.from)}
+                toNode={nodeMap.get(edge.to)}
+                color={getEdgeColor(edge.from, edge.to)}
+              />
+            ))}
 
             {/* Draw temporary edge while connecting */}
             {tempEdge && (
@@ -317,38 +400,25 @@ const App = () => {
 
             {/* Draw nodes */}
             {nodes.map((node) => (
-              <g
+              <Node
                 key={`node-${node.id}`}
+                node={node}
                 onClick={() => handleNodeClick(node)}
-                className="cursor-pointer"
-              >
-                <circle
-                  cx={node.x}
-                  cy={node.y}
-                  r="25"
-                  fill={getNodeColor(node.id)}
-                  className="transition-colors duration-300 shadow-lg"
-                />
-                <text
-                  x={node.x}
-                  y={node.y}
-                  textAnchor="middle"
-                  dy=".3em"
-                  fill="white"
-                  className="text-sm font-bold pointer-events-none"
-                >
-                  {node.label}
-                </text>
-              </g>
+                color={getNodeColor(node.id)}
+              />
             ))}
           </svg>
         </div>
 
         <div className="mt-6 bg-gray-50 p-4 rounded-lg">
-          <h3 className="text-lg font-semibold text-gray-700 mb-2">Instructions:</h3>
+          <h3 className="text-lg font-semibold text-gray-700 mb-2">
+            Instructions:
+          </h3>
           <ul className="text-gray-600 space-y-1">
             <li>1. Click "Add Nodes" and click on the canvas to add nodes</li>
-            <li>2. Click "Connect Nodes" and select two nodes to connect them</li>
+            <li>
+              2. Click "Connect Nodes" and select two nodes to connect them
+            </li>
             <li>3. Set start and end nodes using the respective buttons</li>
             <li>4. Click "Start Algorithm" to find the shortest path</li>
           </ul>
