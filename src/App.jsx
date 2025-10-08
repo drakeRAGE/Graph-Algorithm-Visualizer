@@ -8,6 +8,8 @@ import React, {
   useEffect,
 } from 'react';
 
+import MinHeap from './MinHeap';
+
 const Node = React.memo(({ node, onClick, color }) => (
   <g onClick={onClick} className="cursor-pointer">
     <circle
@@ -30,37 +32,40 @@ const Node = React.memo(({ node, onClick, color }) => (
   </g>
 ));
 
-const Edge = React.memo(({ edge, fromNode, toNode, color }) => (
-  <g>
-    <line
-      x1={fromNode.x}
-      y1={fromNode.y}
-      x2={toNode.x}
-      y2={toNode.y}
-      stroke={color}
-      strokeWidth="3"
-      className="transition-colors duration-300"
-    />
-    <rect
-      x={(fromNode.x + toNode.x) / 2 - 12}
-      y={(fromNode.y + toNode.y) / 2 - 12}
-      width="24"
-      height="24"
-      fill="white"
-      rx="4"
-    />
-    <text
-      x={(fromNode.x + toNode.x) / 2}
-      y={(fromNode.y + toNode.y) / 2}
-      textAnchor="middle"
-      dy=".3em"
-      className="text-sm font-semibold"
-      fill="#4B5563"
-    >
-      {edge.weight}
-    </text>
-  </g>
-));
+const Edge = React.memo(({ edge, fromNode, toNode, color }) => {
+  if (!fromNode || !toNode) return null;
+  return (
+    <g>
+      <line
+        x1={fromNode.x}
+        y1={fromNode.y}
+        x2={toNode.x}
+        y2={toNode.y}
+        stroke={color}
+        strokeWidth="3"
+        className="transition-colors duration-300"
+      />
+      <rect
+        x={(fromNode.x + toNode.x) / 2 - 12}
+        y={(fromNode.y + toNode.y) / 2 - 12}
+        width="24"
+        height="24"
+        fill="white"
+        rx="4"
+      />
+      <text
+        x={(fromNode.x + toNode.x) / 2}
+        y={(fromNode.y + toNode.y) / 2}
+        textAnchor="middle"
+        dy=".3em"
+        className="text-sm font-semibold"
+        fill="#4B5563"
+      >
+        {edge.weight}
+      </text>
+    </g>
+  );
+});
 
 const App = () => {
   const [nodes, setNodes] = useState([]);
@@ -81,11 +86,15 @@ const App = () => {
 
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
+  const visitedSet = useMemo(() => {
+    return new Set(path.slice(0, currentStep + 1));
+  }, [path, currentStep]);
+
   const getNodeColor = useCallback(
     (nodeId) => {
       if (nodeId === startNode) return '#22C55E';
       if (nodeId === endNode) return '#8B5CF6';
-      if (path.slice(0, currentStep + 1).includes(nodeId)) return '#EF4444';
+      if (visitedSet.has(nodeId)) return '#EF4444';
       return '#4B5563';
     },
     [startNode, endNode, path, currentStep]
@@ -109,6 +118,7 @@ const App = () => {
 
   // Handle canvas click for adding nodes
   const handleCanvasClick = (e) => {
+    e?.stopPropagation();
     if (mode !== 'add') return;
 
     const svg = e.currentTarget;
@@ -148,7 +158,7 @@ const App = () => {
             to: node.id,
             weight: parseInt(weight),
           };
-          setEdges([...edges, newEdge]);
+          setEdges((prevEdges) => [...prevEdges, newEdge]);
         }
         setSelectedNode(null);
         setIsAddingEdge(false);
@@ -192,56 +202,51 @@ const App = () => {
     };
   }, []);
 
-  // Dijkstra's algorithm implementation
   const dijkstra = (start, end) => {
     if (!start || !end) return { path: [], steps: [] };
 
     const distances = {};
     const previous = {};
-    const unvisited = new Set();
+    const visited = new Set();
+    const heap = new MinHeap();
     const steps = [];
 
     nodes.forEach((node) => {
       distances[node.id] = Infinity;
       previous[node.id] = null;
-      unvisited.add(node.id);
     });
+
     distances[start] = 0;
+    heap.push({ node: start, dist: 0 });
 
-    while (unvisited.size > 0) {
-      let current = null;
-      let minDistance = Infinity;
-      unvisited.forEach((nodeId) => {
-        if (distances[nodeId] < minDistance) {
-          minDistance = distances[nodeId];
-          current = nodeId;
-        }
-      });
-
-      if (current === null || current === end) break;
-
-      unvisited.delete(current);
+    while (!heap.isEmpty()) {
+      const { node: current } = heap.pop();
+      if (visited.has(current)) continue;
+      visited.add(current);
       steps.push(current);
+
+      if (current === end) break;
 
       edges
         .filter((edge) => edge.from === current || edge.to === current)
         .forEach((edge) => {
           const neighbor = edge.from === current ? edge.to : edge.from;
-          if (!unvisited.has(neighbor)) return;
+          if (visited.has(neighbor)) return;
 
-          const newDistance = distances[current] + edge.weight;
-          if (newDistance < distances[neighbor]) {
-            distances[neighbor] = newDistance;
+          const newDist = distances[current] + edge.weight;
+          if (newDist < distances[neighbor]) {
+            distances[neighbor] = newDist;
             previous[neighbor] = current;
+            heap.push({ node: neighbor, dist: newDist });
           }
         });
     }
 
     const path = [];
-    let current = end;
-    while (current !== null) {
-      path.unshift(current);
-      current = previous[current];
+    let curr = end;
+    while (curr !== null) {
+      path.unshift(curr);
+      curr = previous[curr];
     }
 
     return { path, steps };
@@ -273,6 +278,11 @@ const App = () => {
     setEndNode(null);
     setNodeIdCounter(1);
   };
+
+  const handleNodeClickMemo = useCallback(
+    (node) => () => handleNodeClick(node),
+    [handleNodeClick]
+  );
 
   return (
     <div className="min-h-screen bg-gray-100 p-8">
@@ -375,9 +385,9 @@ const App = () => {
             onMouseMove={handleMouseMove}
           >
             {/* Draw edges */}
-            {edges.map((edge, index) => (
+            {edges.map((edge) => (
               <Edge
-                key={`edge-${index}`}
+                key={`${Date.now()}-${edge.from}-${edge.to}`}
                 edge={edge}
                 fromNode={nodeMap.get(edge.from)}
                 toNode={nodeMap.get(edge.to)}
@@ -403,7 +413,7 @@ const App = () => {
               <Node
                 key={`node-${node.id}`}
                 node={node}
-                onClick={() => handleNodeClick(node)}
+                onClick={handleNodeClickMemo(node)}
                 color={getNodeColor(node.id)}
               />
             ))}
