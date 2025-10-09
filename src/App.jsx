@@ -133,39 +133,41 @@ const App = () => {
       y,
     };
 
-    setNodes([...nodes, newNode]);
-    setNodeIdCounter(nodeIdCounter + 1);
+    setNodes((prev) => [...prev, newNode]);
+    setNodeIdCounter((prev) => prev + 1);
   };
 
-  // Handle node click based on current mode
-  const handleNodeClick = (node) => {
-    if (mode === 'setStart') {
-      setStartNode(node.id);
-      setMode('add');
-    } else if (mode === 'setEnd') {
-      setEndNode(node.id);
-      setMode('add');
-    } else if (mode === 'connect') {
-      if (!selectedNode) {
-        setSelectedNode(node);
-        setIsAddingEdge(true);
-        setTempEdge({ from: node, to: { x: node.x, y: node.y } });
-        tempToRef.current = { x: node.x, y: node.y };
-      } else {
-        if (selectedNode.id !== node.id) {
-          const newEdge = {
-            from: selectedNode.id,
-            to: node.id,
-            weight: parseInt(weight),
-          };
-          setEdges((prevEdges) => [...prevEdges, newEdge]);
+  const handleNodeClick = useCallback(
+    (node) => {
+      if (mode === 'setStart') {
+        setStartNode(node.id);
+        setMode('add');
+      } else if (mode === 'setEnd') {
+        setEndNode(node.id);
+        setMode('add');
+      } else if (mode === 'connect') {
+        if (!selectedNode) {
+          setSelectedNode(node);
+          setIsAddingEdge(true);
+          setTempEdge({ from: node, to: { x: node.x, y: node.y } });
+          tempToRef.current = { x: node.x, y: node.y };
+        } else {
+          if (selectedNode.id !== node.id) {
+            const newEdge = {
+              from: selectedNode.id,
+              to: node.id,
+              weight: parseInt(weight),
+            };
+            setEdges((prevEdges) => [...prevEdges, newEdge]);
+          }
+          setSelectedNode(null);
+          setIsAddingEdge(false);
+          setTempEdge(null);
         }
-        setSelectedNode(null);
-        setIsAddingEdge(false);
-        setTempEdge(null);
       }
-    }
-  };
+    },
+    [mode, selectedNode, weight]
+  );
 
   // Handle mouse move for edge preview
   const handleMouseMove = (e) => {
